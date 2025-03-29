@@ -3,7 +3,8 @@ import parser from 'socket.io-msgpack-parser';
 import sheet from './assets/sheet.json';
 import sheet_tanks from './assets/sheet_tanks.png';
 
-const ws = 'https://tanks-multiplayer-server.glitch.me/'
+const ws = 'https://tanks-multiplayer-server.glitch.me/';
+// const ws = 'http://localhost:3000'
 
 /** @type {HTMLCanvasElement} */
 const canvas = document.getElementById('canvas');
@@ -18,55 +19,55 @@ let spriteSheet, tanks, barrels, bullet, smoke, terrain, objects_sprites;
 /** @type {Socket} */
 let socket;
 
-let players = [];
-let shots = [];
+let players = {};
+let shots = {};
 let smokes = [];
-let objects = [];
+let deadTime = 0;
 
-let { sin, cos, PI, floor, sqrt } = Math;
+let { PI, floor, cos, sin } = Math;
 
 let keys = [];
 
 const offcanvas = new OffscreenCanvas(canvas.width, canvas.height);
 const offctx = offcanvas.getContext('2d');
 
-const drawSprite = (sprite, rect) => {
+const drawSprite = (sprite, rect, context = ctx) => {
   let mx = rect.x + rect.w / 2;
   let my = rect.y + rect.h / 2;
-  ctx.save();
-  ctx.translate(mx, my);
-  ctx.rotate(rect.angle);
-  ctx.translate(-mx, -my);
-  ctx.drawImage(spriteSheet, sprite.x, sprite.y, sprite.width, sprite.height, rect.x, rect.y, rect.w, rect.h);
-  ctx.restore();
+  context.save();
+  context.translate(mx, my);
+  context.rotate(rect.angle);
+  context.translate(-mx, -my);
+  context.drawImage(spriteSheet, sprite.x, sprite.y, sprite.width, sprite.height, rect.x, rect.y, rect.w, rect.h);
+  context.restore();
 }
 
-const drawTerrain = (index) => {
+const drawTerrain = (index, objects) => {
   for (let i = 0; i < canvas.width * canvas.height; i++) {
     let x = i % canvas.width;
     let y = floor(i / canvas.width) % canvas.height;
     offctx.drawImage(spriteSheet, terrain[index].x, terrain[index].y, terrain[index].width, terrain[index].height, x * 64, y * 64, 64, 64);
   }
+  objects.forEach(e => drawSprite(objects_sprites[e.index], e, offctx))
 }
 
 const draw = () => {
   ctx.drawImage(offcanvas, 0, 0);
 
-  objects.forEach(e => drawSprite(objects_sprites[e.index], e))
+  for (const id in players) {
+    const player = players[id];
+    let pmx = player.x + player.w / 2;
+    let pmy = player.y + player.h / 2;
 
-  players.forEach(e => {
-    let pmx = e.x + e.w / 2;
-    let pmy = e.y + e.h / 2;
+    if (player.id == socket.id) {
 
-    if (e.id == socket.id) {
-
-      if (e.destroyed) {
+      if (player.life <= 0) {
         ctx.save();
         ctx.fillStyle = '#fff';
         ctx.font = '32px Arial';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText('Renascer em ' + (3 - floor((Date.now() - e.deadTime) / 1000)), WIDTH / 2, HEIGHT / 2);
+        ctx.fillText('Renascer em ' + (3 - floor((Date.now() - deadTime) / 1000)), WIDTH / 2, HEIGHT / 2);
         ctx.restore();
         return;
       }
@@ -75,50 +76,55 @@ const draw = () => {
       ctx.fillStyle = '#fff';
       ctx.font = '16px Arial';
       ctx.textBaseline = 'top';
-      ctx.fillText('Baixas: ' + e.kills, 8, 8);
+      ctx.fillText('Baixas: ' + player.kills, 8, 8);
 
       ctx.font = '16px Arial';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'bottom';
-      ctx.fillText('Jogador', pmx, pmy - e.h);
+      ctx.fillText('Jogador', pmx, pmy - player.h);
       ctx.restore();
     }
 
-    if (!e.destroyed) {
-      ctx.fillStyle = e.life > 0.5 ? '#00ff0088' : '#ff000088';
-      ctx.fillRect(pmx - e.life * e.w / 2, pmy - e.h, e.life * e.w, 10);
-      drawSprite(tanks[e.sprite], e);
+    if (player.life > 0) {
+      ctx.fillStyle = player.life > 50 ? '#00ff0088' : '#ff000088';
+      ctx.fillRect(pmx - player.life / 100 * player.w / 2, pmy - player.h, player.life / 100 * player.w, 10);
+      drawSprite(tanks[player.sprite], player);
 
       ctx.save();
       ctx.translate(pmx, pmy);
-      ctx.rotate(e.angle + e.barrel.angle - PI);
+      ctx.rotate(player.angle + player.barrel.angle - PI);
       ctx.translate(-pmx, -pmy);
-      drawSprite(barrels[e.barrel.sprite], { ...e.barrel, x: pmx - e.barrel.w / 2, y: pmy, angle: 0 });
+      drawSprite(barrels[player.barrel.sprite], { ...player.barrel, x: pmx - player.barrel.w / 2, y: pmy, angle: 0 });
       ctx.restore();
     }
-  });
+  }
 
-  shots.forEach(e => drawSprite(bullet, e));
-
-  smokes = smokes.filter(e => Date.now() - e.time < 300);
+  for (const id in shots) {
+    const shot = shots[id];
+    shot.x += sin(shot.angle) * shot.speed;
+    shot.y -= cos(shot.angle) * shot.speed;
+    drawSprite(bullet, shot)
+  }
 
   smokes.forEach(e => {
-    let index = floor((2 / 250) * (Date.now() - e.time));
+    let index = Math.min(floor((2 / 300) * (Date.now() - e.time)), 2);
     drawSprite(smoke[index], {
-      x: e.x - e.sizes[index].width / 2,
-      y: e.y - e.sizes[index].height / 2,
-      w: e.sizes[index].width,
-      h: e.sizes[index].height
+      x: e.x - smoke[index].width / 4,
+      y: e.y - smoke[index].height / 4,
+      w: smoke[index].width / 2,
+      h: smoke[index].height / 2
     });
   });
+
+  smokes = smokes.filter(e => Date.now() - e.time < 300);
 }
 
 const loop = () => {
   if (keys.length) {
-    socket.volatile.emit('move', { keys });
+    socket.volatile.emit('move', keys);
   }
   draw();
-  requestAnimationFrame(loop);
+  setTimeout(loop, 1000 / 60);
 }
 
 const resize = () => {
@@ -170,23 +176,54 @@ const resize = () => {
     socket.on('join', e => {
       players = e.players;
       shots = e.shots;
-      objects = e.objects;
-      drawTerrain(e.terrain);
+      drawTerrain(e.terrain, e.objects);
+    });
+
+    socket.on('respawn', player => {
+      players[player.id] = player;
     })
 
-    socket.on('update', e => {
-      players = e.players;
-      shots = e.shots;
-      objects = e.objects;
-      e.smokes.forEach(s => smokes.push({ ...s, time: Date.now() }));
+    socket.on('updatePlayerLife', ([id, life]) => {
+      players[id].life = life;
+      if (id == socket.id) {
+        deadTime = Date.now()
+      }
+    })
+
+    socket.on('createBullet', bullet => {
+      shots[bullet.id] = bullet;
+      smokes.push({
+        x: bullet.x,
+        y: bullet.y,
+        time: Date.now(),
+      })
+    })
+
+    socket.on('removeBullet', bulletId => {
+      smokes.push({
+        x: shots[bulletId].x,
+        y: shots[bulletId].y,
+        time: Date.now(),
+      })
+      delete shots[bulletId];
+    })
+
+    socket.on('playerMoved', player => {
+      players[player.id] = player;
+    })
+
+    socket.on('newPlayer', player => {
+      players[player.id] = player;
+    });
+
+    socket.on('playerDisconnected', playerId => {
+      delete players[playerId];
     });
 
     socket.on('disconnect', () => {
-      players = [];
-      shots = [];
-      objects = [];
-      smokes = [];
-    })
+      players = {};
+      shots = {};
+    });
     resize();
     loop();
   };
@@ -202,4 +239,80 @@ window.addEventListener('keydown', e => {
 
 window.addEventListener('keyup', e => {
   keys = keys.filter(key => key != e.code);
+});
+const dpad = document.createElement('div');
+dpad.style.position = 'absolute';
+dpad.style.bottom = '10px';
+dpad.style.left = '10px';
+dpad.style.display = 'grid';
+dpad.style.gridTemplateColumns = '50px 50px 50px';
+dpad.style.gridTemplateRows = '50px 50px 50px';
+dpad.style.gap = '5px';
+dpad.style.zIndex = '10';
+
+document.body.appendChild(dpad);
+
+const directions = [
+  [null, 'KeyW', null],
+  ['KeyA', null, 'KeyD'],
+  [null, 'KeyS', null]
+];
+
+const keysMap = {
+  'KeyW': '↑',
+  'KeyS': '↓',
+  'KeyA': '←',
+  'KeyD': '→'
+};
+
+directions.forEach(row => {
+  row.forEach(dir => {
+    const btn = document.createElement('button');
+    btn.style.width = '50px';
+    btn.style.height = '50px';
+    btn.style.fontSize = '16px';
+    btn.style.borderRadius = '10px';
+    btn.style.textAlign = 'center';
+    btn.style.background = dir ? '#555' : 'transparent';
+    btn.style.border = 'none';
+    btn.style.userSelect = 'none';
+    btn.style.color = '#fff';
+    btn.textContent = dir ? keysMap[dir] : '';
+    dpad.appendChild(btn);
+
+    if (dir) {
+      btn.addEventListener('touchstart', () => {
+        if (!keys.includes(dir)) keys.push(dir);
+      });
+      btn.addEventListener('touchend', () => {
+        keys = keys.filter(k => k !== dir);
+      });
+    } else {
+      btn.style.visibility = 'hidden'
+    }
+  });
+});
+
+const fireBtn = document.createElement('button');
+fireBtn.textContent = 'Fire';
+fireBtn.style.position = 'absolute';
+fireBtn.style.bottom = '20px';
+fireBtn.style.right = '20px';
+fireBtn.style.width = '80px';
+fireBtn.style.height = '80px';
+fireBtn.style.fontSize = '18px';
+fireBtn.style.userSelect = 'none';
+fireBtn.style.borderRadius = '50%';
+fireBtn.style.background = '#f00';
+fireBtn.style.color = '#fff';
+fireBtn.style.border = 'none';
+document.body.appendChild(fireBtn);
+
+fireBtn.addEventListener('touchstart', () => {
+  keys.push('Space');
+});
+
+
+fireBtn.addEventListener('touchend', () => {
+  keys = keys.filter(k => k !== 'Space')
 });

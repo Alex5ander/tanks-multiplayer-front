@@ -2,10 +2,11 @@
   "name": "tanks-multiplayer",
   "version": "1.0.0",
   "main": "script.js",
+  "type": "module",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "vite",
-    "dev": "vite dev",
+    "dev": "vite --host",
     "build": "vite build"
   },
   "keywords": [],
